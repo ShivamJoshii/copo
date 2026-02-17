@@ -1,13 +1,13 @@
-# Pinned dependencies for Streamlit Cloud (Python 3.11)
-pandas==2.2.0
-numpy==1.26.3
-streamlit==1.35.0
-torch==2.2.0
-transformers==4.38.1
-scikit-learn==1.4.0
-spacy==3.7.4
-sentence-transformers==2.5.1
-reportlab==4.1.0
+# Pinned dependencies for Streamlit Cloud
+pandas>=2.2,<3
+numpy>=1.26,<2
+streamlit>=1.35,<2
+torch>=2.5.0
+transformers>=4.38,<5
+scikit-learn>=1.4,<2
+spacy>=3.7,<4
+sentence-transformers>=2.5,<3
+reportlab>=4.1,<5
 
 # spaCy model
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
