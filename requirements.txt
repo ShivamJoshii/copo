@@ -1,9 +1,8 @@
-# Pinned dependencies for production deployment
---extra-index-url https://download.pytorch.org/whl/cpu
+# Pinned dependencies for Streamlit Cloud (Python 3.11)
 pandas==2.2.0
 numpy==1.26.3
 streamlit==1.35.0
-torch==2.2.0+cpu
+torch==2.2.0
 transformers==4.38.1
 scikit-learn==1.4.0
 spacy==3.7.4
