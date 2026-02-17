@@ -1,0 +1,44 @@
+# Git files
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.venv
+env/
+venv/
+
+# Tests
+tests/
+*.test.py
+
+# Documentation
+*.md
+!README.md
+
+# Data (if large)
+data/*.csv
+data/*.xlsx
+
+# Netlify (not needed for Render)
+netlify.toml
+.netlify/
