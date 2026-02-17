@@ -1,0 +1,16 @@
+[build]
+  command = "pip install -r co-po-burt/requirements.txt"
+  publish = "."
+
+[[plugins]]
+  package = "@netlify/plugin-python"
+
+[build.environment]
+  PYTHON_VERSION = "3.11"
+
+
+
+
+
+
+
