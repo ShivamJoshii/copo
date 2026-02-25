@@ -431,11 +431,8 @@ def generate_co_po_mapping(co_df: pd.DataFrame, po_df: pd.DataFrame,
         for j, outcome in enumerate(po_ids):
             sim01 = float(sim_matrix[i, j])
 
-            # Apply threshold: force weight to 0 if similarity below threshold
-            if sim01 < threshold:
-                weight = 0
-            else:
-                weight = similarity_to_weight(sim01, t3=0.75, t2=0.50, t1=0.25)
+            # Use fixed bins for weight assignment
+            weight = similarity_to_weight_bins(sim01)
 
             rows.append(
                 {
