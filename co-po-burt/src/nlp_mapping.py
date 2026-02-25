@@ -421,11 +421,8 @@ def generate_co_po_mapping(co_df: pd.DataFrame, po_df: pd.DataFrame,
     po_emb = model.encode(po_texts_clean, normalize_embeddings=True, show_progress_bar=False)
 
     # ---- compute similarity matrix ----
-    # With normalized embeddings, cosine similarity is already in [-1, 1] range
+    # With normalized embeddings, cosine similarity is in [0, 1] for semantic similarity
     sim_matrix = cosine_similarity(co_emb, po_emb)
-
-    # Convert cosine similarity from [-1, 1] to [0, 1] scale
-    sim_matrix = (sim_matrix + 1.0) / 2.0
     sim_matrix = np.clip(sim_matrix, 0.0, 1.0)
 
     # ---- build mapping ----
@@ -480,10 +477,10 @@ def generate_co_to_single_outcome_mapping(
     Uses normalized embeddings and fixed weight bins for stable, predictable results.
 
     Fixed weight bins:
-        0.00-0.25 => 0
-        0.25-0.50 => 1
-        0.50-0.75 => 2
-        0.75-1.00 => 3
+        0.00-0.10 => 0
+        0.10-0.25 => 1
+        0.25-0.50 => 2
+        0.50+ => 3
 
     Args:
         co_df: DataFrame containing Course Outcomes with ID and text columns
