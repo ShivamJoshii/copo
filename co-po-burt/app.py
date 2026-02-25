@@ -946,28 +946,68 @@ elif mode == "Full Pipeline (Map → Attain → PO)":
                     st.session_state.pipeline_step = 3
                     st.rerun()
     
-    # Step 3: Upload Assessment Data
+    # Step 3: Upload Assessment Data (One Excel File)
     if step >= 3:
         with st.expander("📊 Step 3: Upload Assessment Data", expanded=(step == 3)):
-            st.markdown("Upload Internal and ESE assessment data")
+            st.markdown("""
+            **Upload ONE Excel file with tabs:**
+            - **Internal** tab: Raw IA student scores
+            - **ESE** tab: Raw ESE student scores  
+            - **Indirect** tab (optional): Indirect assessment data
+            """)
             
             col1, col2, col3 = st.columns(3)
             course_code = col1.text_input("Course Code", value="CS601")
             course_name = col2.text_input("Course Name", value="Compiler Design")
             year = col3.text_input("Year", value="2024")
             
-            internal_file = st.file_uploader("Internal Assessment CSV", type=["csv"], key="pipeline_internal")
-            ese_file = st.file_uploader("ESE CSV (optional)", type=["csv"], key="pipeline_ese")
+            excel_file = st.file_uploader("Assessment Excel (Internal/ESE/Indirect tabs)", type=["xlsx", "xls"], key="pipeline_excel")
             
             col1, col2, col3 = st.columns(3)
             internal_weight = col1.slider("Internal Weight", 0.0, 1.0, 0.4, 0.1)
             ese_weight = col2.slider("ESE Weight", 0.0, 1.0, 0.6, 0.1)
             indirect_weight = col3.slider("Indirect Weight", 0.0, 1.0, 0.0, 0.1)
             
-            if internal_file:
+            if excel_file:
                 if st.button("Process Assessments →", type="primary"):
                     with st.spinner("Processing assessments..."):
-                        internal_df = pd.read_csv(internal_file)
+                        # Parse Excel file
+                        xl = pd.ExcelFile(excel_file)
+                        available_sheets = xl.sheet_names
+                        
+                        st.info(f"Found tabs: {', '.join(available_sheets)}")
+                        
+                        # Find Internal tab
+                        internal_sheet = None
+                        for s in available_sheets:
+                            if 'internal' in s.lower() or s.lower() == 'ia':
+                                internal_sheet = s
+                                break
+                        
+                        # Find ESE tab
+                        ese_sheet = None
+                        for s in available_sheets:
+                            if 'ese' in s.lower() or 'external' in s.lower():
+                                ese_sheet = s
+                                break
+                        
+                        # Find Indirect tab
+                        indirect_sheet = None
+                        for s in available_sheets:
+                            if 'indirect' in s.lower():
+                                indirect_sheet = s
+                                break
+                        
+                        if not internal_sheet:
+                            st.error("Could not find 'Internal' tab in Excel. Please name it 'Internal' or 'IA'")
+                            st.stop()
+                        
+                        if not ese_sheet:
+                            st.error("Could not find 'ESE' tab in Excel. Please name it 'ESE' or 'External'")
+                            st.stop()
+                        
+                        # Load Internal data
+                        internal_df = pd.read_excel(excel_file, sheet_name=internal_sheet)
                         
                         # Auto-detect CO columns
                         internal_co_mapping = extract_co_columns(internal_df)
@@ -984,33 +1024,41 @@ elif mode == "Full Pipeline (Map → Attain → PO)":
                             internal_df, internal_co_mapping, max_marks
                         )
                         
-                        # Process ESE if provided
-                        if ese_file:
-                            ese_df = pd.read_csv(ese_file)
-                            ese_co_mapping = extract_co_columns(ese_df)
-                            ese_max_marks = {}
-                            for co, cols in ese_co_mapping.items():
-                                for col in cols:
-                                    if col in ese_df.columns:
-                                        ese_max_marks[col] = ese_df[col].max()
-                            
-                            ese_results = calculate_co_attainment_from_internal(
-                                ese_df, ese_co_mapping, ese_max_marks
-                            )
-                            
-                            # Calculate weighted
-                            weighted = calculate_weighted_co_attainment(
-                                internal_results.rename(columns={'attainment_pct': 'attainment_pct'}),
-                                ese_results.rename(columns={'attainment_pct': 'attainment_pct'}),
-                                internal_weight=internal_weight,
-                                ese_weight=ese_weight,
-                                indirect_weight=indirect_weight
-                            )
-                        else:
-                            weighted = internal_results.copy()
-                            weighted['direct_attainment'] = weighted['attainment_pct']
-                            weighted['final_attainment'] = weighted['attainment_pct']
-                            weighted['attainment_value'] = weighted['attainment_pct'] / 100.0
+                        # Load and process ESE
+                        ese_df = pd.read_excel(excel_file, sheet_name=ese_sheet)
+                        ese_co_mapping = extract_co_columns(ese_df)
+                        ese_max_marks = {}
+                        for co, cols in ese_co_mapping.items():
+                            for col in cols:
+                                if col in ese_df.columns:
+                                    ese_max_marks[col] = ese_df[col].max()
+                        
+                        ese_results = calculate_co_attainment_from_internal(
+                            ese_df, ese_co_mapping, ese_max_marks
+                        )
+                        
+                        # Load Indirect if available
+                        indirect_results = None
+                        if indirect_sheet:
+                            indirect_df = pd.read_excel(excel_file, sheet_name=indirect_sheet)
+                            # For indirect, expect columns: co, attainment_pct
+                            if 'co' in indirect_df.columns and 'attainment_pct' in indirect_df.columns:
+                                indirect_results = indirect_df
+                        
+                        # Calculate weighted attainment: Direct = (IA × weight + ESE × weight)
+                        weighted = calculate_weighted_co_attainment(
+                            internal_results.rename(columns={'attainment_pct': 'attainment_pct'}),
+                            ese_results.rename(columns={'attainment_pct': 'attainment_pct'}),
+                            internal_weight=internal_weight,
+                            ese_weight=ese_weight,
+                            indirect_weight=indirect_weight,
+                            indirect_scores=indirect_results
+                        )
+                        
+                        # Store results for display
+                        st.session_state.pipeline_internal_results = internal_results
+                        st.session_state.pipeline_ese_results = ese_results
+                        st.session_state.pipeline_weighted_results = weighted
                         
                         # Build CO attainment records
                         co_records = []
@@ -1046,16 +1094,41 @@ elif mode == "Full Pipeline (Map → Attain → PO)":
     # Step 4: Review CO Attainment
     if step >= 4 and st.session_state.pipeline_co_attainment is not None:
         with st.expander("📈 Step 4: CO Attainment Results", expanded=(step == 4)):
-            co_df = st.session_state.pipeline_co_attainment
+            st.markdown("### Full Attainment Flow: Internal → ESE → Direct → Final")
             
-            # Pivot for display
+            internal_res = st.session_state.pipeline_internal_results
+            ese_res = st.session_state.pipeline_ese_results
+            weighted_res = st.session_state.pipeline_weighted_results
+            
+            # Display all four components side by side
+            co_tabs = st.tabs(["Internal (%)", "ESE (%)", "Direct (%)", "Final (%)"])
+            
+            with co_tabs[0]:
+                st.markdown("**Internal Assessment Attainment**")
+                st.dataframe(internal_res[['co', 'students_above_50', 'total_students', 'attainment_pct', 'attainment_level']], use_container_width=True)
+            
+            with co_tabs[1]:
+                st.markdown("**ESE Attainment**")
+                st.dataframe(ese_res[['co', 'students_above_50', 'total_students', 'attainment_pct', 'attainment_level']], use_container_width=True)
+            
+            with co_tabs[2]:
+                st.markdown("**Direct Attainment = (IA × weight) + (ESE × weight)**")
+                st.dataframe(weighted_res[['co', 'attainment_pct_internal', 'attainment_pct_ese', 'direct_attainment']], use_container_width=True)
+            
+            with co_tabs[3]:
+                st.markdown("**Final CO Attainment** (includes Indirect if provided)")
+                final_display = weighted_res[['co', 'direct_attainment', 'indirect_attainment', 'final_attainment']].copy()
+                st.dataframe(final_display, use_container_width=True)
+            
+            # Summary pivot
+            st.markdown("### Summary Table")
+            co_df = st.session_state.pipeline_co_attainment
             co_pivot = co_df.pivot_table(
                 index=['year', 'course', 'co'],
                 columns='attainment_type',
                 values='value',
                 aggfunc='first'
             ).reset_index()
-            
             st.dataframe(co_pivot, use_container_width=True)
             
             col1, col2 = st.columns(2)
