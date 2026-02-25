@@ -77,6 +77,28 @@ def preprocess_light(text: str) -> str:
     return " ".join(tokens)
 
 
+def preprocess_minimal(text: str) -> str:
+    """
+    Minimal preprocessing: clean whitespace only, preserve full semantic meaning.
+
+    This is the "human-like" mode - keeps all words including verbs,
+    stopwords, everything. The sentence transformer model understands
+    context better when given complete sentences.
+
+    Args:
+        text: Input text to preprocess
+
+    Returns:
+        Cleaned text with full semantic content preserved
+    """
+    # Just normalize whitespace and lowercase
+    text = text.lower().strip()
+    # Collapse multiple spaces/newlines into single space
+    import re
+    text = re.sub(r'\s+', ' ', text)
+    return text
+
+
 def preprocess_aggressive(text: str, dept: str = "general") -> str:
     """
     Aggressive preprocessing: remove stopwords, generic verbs, and punctuation.
@@ -134,11 +156,14 @@ def preprocess(text: str, dept: str = "general", mode: str = "aggressive_with_fa
     Args:
         text: Input text to preprocess
         dept: Department identifier for specialized filtering (engineering, business, cs, or general)
-        mode: Preprocessing mode - "aggressive", "light", or "aggressive_with_fallback"
+        mode: Preprocessing mode - "minimal", "aggressive", "light", or "aggressive_with_fallback"
 
     Returns:
         Cleaned text according to the specified mode
     """
+    if mode == "minimal":
+        return preprocess_minimal(text)
+
     if mode == "light":
         return preprocess_light(text)
 

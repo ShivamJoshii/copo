@@ -58,9 +58,9 @@ if mode == "NLP CO–PO Mapping":
     st.sidebar.markdown("**Preprocessing**")
     preprocess_mode = st.sidebar.selectbox(
         "Preprocessing Strength",
-        ["aggressive_with_fallback", "aggressive", "light"],
+        ["minimal", "aggressive_with_fallback", "aggressive", "light"],
         index=0,
-        help="aggressive: removes stopwords + generic verbs; light: stopwords only; fallback: tries aggressive, uses light if too short"
+        help="minimal: keeps full sentences (human-like, recommended); aggressive: removes stopwords + generic verbs; light: stopwords only; fallback: tries aggressive, uses light if too short"
     )
     dept = st.sidebar.selectbox(
         "Department",
@@ -70,6 +70,9 @@ if mode == "NLP CO–PO Mapping":
     )
 
     st.sidebar.info("ℹ️ Weight bins are fixed:\n- 0.00-0.25 ⇒ 0\n- 0.25-0.50 ⇒ 1\n- 0.50-0.75 ⇒ 2\n- 0.75-1.00 ⇒ 3")
+
+    show_comparison = st.sidebar.checkbox("Show raw vs processed similarity", value=False,
+        help="Compare similarity scores with and without preprocessing")
 
     if not co_text_file:
         st.info("⬅️ Upload CO statement CSV to begin")
@@ -158,6 +161,19 @@ if mode == "NLP CO–PO Mapping":
             dept=dept,
             preprocess_mode=preprocess_mode
         )
+        
+        # Optionally compute raw (unprocessed) similarity for comparison
+        if show_comparison:
+            raw_mapping_df = generate_co_to_single_outcome_mapping(
+                co_text_df,
+                outcome_id=selected_outcome_id,
+                outcome_text=selected_outcome_text,
+                dept=dept,
+                preprocess_mode="minimal"
+            )
+            # Merge raw similarity into main dataframe
+            mapping_df['raw_similarity'] = raw_mapping_df['similarity']
+            mapping_df['similarity_diff'] = mapping_df['raw_similarity'] - mapping_df['similarity']
 
     # Display results
     st.subheader(f"CO Mapping to {selected_outcome_id}")
