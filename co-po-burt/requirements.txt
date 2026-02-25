@@ -8,6 +8,7 @@ scikit-learn>=1.4,<2
 spacy>=3.7,<4
 sentence-transformers>=2.5,<3
 reportlab>=4.1,<5
+openpyxl>=3.1,<4
 
 # spaCy model - installed at build time
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl

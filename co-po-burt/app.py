@@ -9,7 +9,8 @@ from src.nba_math import compute_po_attainment_nba
 from src.burt import compute_burt_adjustments_from_students
 
 from src.nlp_mapping import generate_co_po_mapping, generate_co_to_single_outcome_mapping
-from src.co_attainment_calculator import generate_co_attainment_csv
+from src.co_attainment_calculator import generate_co_attainment_csv, calculate_co_attainment_from_internal, calculate_weighted_co_attainment
+from src.excel_parser import parse_compiler_excel, extract_co_columns
 
 
 
@@ -29,7 +30,7 @@ mode = st.sidebar.radio(
 
     "Select Mode",
 
-    ["NLP CO–PO Mapping", "CO Attainment Calculator", "PO/PSO Attainment Calculation"]
+    ["NLP CO–PO Mapping", "CO Attainment Calculator", "PO/PSO Attainment Calculation", "End-to-End (Excel → CO → PO)"]
 
 )
 
@@ -162,7 +163,14 @@ if mode == "NLP CO–PO Mapping":
     st.subheader(f"CO Mapping to {selected_outcome_id}")
 
     # Show top-N preview
-    top_n = st.slider("Show top N results", min_value=5, max_value=len(mapping_df), value=min(10, len(mapping_df)), step=1)
+    # Fix: Handle empty dataframe case
+    if mapping_df.empty:
+        st.warning("No mapping results available. The dataframe is empty.")
+        top_n = 5
+    else:
+        max_slider = max(5, len(mapping_df))
+        default_val = min(10, len(mapping_df)) if len(mapping_df) > 0 else 5
+        top_n = st.slider("Show top N results", min_value=5, max_value=max_slider, value=default_val, step=1)
     st.markdown(f"**Top {top_n} Results (sorted by similarity)**")
     st.dataframe(mapping_df.head(top_n), use_container_width=True)
 
@@ -539,3 +547,285 @@ elif mode == "CO Attainment Calculator":
             )
             
             st.success("✅ CO Attainment calculated. Download and use in PO Attainment Calculation mode.")
+
+
+# --------------------
+# End-to-End Mode (Excel → CO → PO)
+# --------------------
+
+elif mode == "End-to-End (Excel → CO → PO)":
+    st.header("End-to-End Attainment Calculator")
+    st.markdown("""
+    **Complete pipeline:** Upload Excel → Calculate CO Attainment → Compute PO/PSO Attainment
+    
+    **Expected Excel Format:**
+    - **Internal** tab: Student internal assessment scores (CO-mapped columns)
+    - **ESE** tab: End Semester Exam scores (CO-mapped columns)
+    - **Indirect** tab (optional): Indirect assessment data
+    - **Mapping** tab: CO → PO/PSO mapping with weights
+    
+    **Flow:** Internal → ESE → Direct → Final CO → PO/PSO %
+    """)
+    
+    # Course metadata
+    col1, col2, col3 = st.columns(3)
+    course_code = col1.text_input("Course Code", value="CS601")
+    course_name = col2.text_input("Course Name", value="Compiler Design")
+    year = col3.text_input("Year", value="2024")
+    
+    # File uploads
+    st.subheader("Upload Data")
+    
+    excel_file = st.file_uploader("Assessment Excel (Internal/ESE/Indirect tabs)", type=["xlsx", "xls"])
+    threshold_file = st.file_uploader("Thresholds CSV", type=["csv"])
+    target_file = st.file_uploader("Targets CSV", type=["csv"])
+    
+    # Weights for attainment calculation
+    st.subheader("Attainment Weights")
+    col1, col2, col3 = st.columns(3)
+    internal_weight = col1.slider("Internal Weight", 0.0, 1.0, 0.4, 0.1)
+    ese_weight = col2.slider("ESE Weight", 0.0, 1.0, 0.6, 0.1)
+    indirect_weight = col3.slider("Indirect Weight", 0.0, 1.0, 0.0, 0.1)
+    
+    if excel_file and threshold_file and target_file:
+        # Load thresholds and targets
+        try:
+            thresholds = load_thresholds(threshold_file)
+            targets = load_targets(target_file)
+        except Exception as e:
+            st.error(f"Error loading thresholds/targets: {e}")
+            st.stop()
+        
+        # Parse Excel
+        try:
+            parsed = parse_compiler_excel(excel_file)
+            internal_df = parsed.get('internal')
+            ese_df = parsed.get('ese')
+            indirect_df = parsed.get('indirect')
+        except Exception as e:
+            st.error(f"Error parsing Excel: {e}")
+            st.stop()
+        
+        if internal_df is None:
+            st.error("Could not find Internal assessment data in Excel. Please ensure a tab named 'Internal' exists.")
+            st.stop()
+        
+        # Display previews
+        st.subheader("Data Preview")
+        
+        with st.expander("Internal Assessment Data"):
+            st.dataframe(internal_df.head(10), use_container_width=True)
+        
+        if ese_df is not None:
+            with st.expander("ESE Data"):
+                st.dataframe(ese_df.head(10), use_container_width=True)
+        
+        if indirect_df is not None:
+            with st.expander("Indirect Assessment Data"):
+                st.dataframe(indirect_df.head(10), use_container_width=True)
+        
+        # Auto-detect CO columns
+        internal_co_mapping = extract_co_columns(internal_df)
+        
+        st.subheader("Detected CO Column Mapping")
+        for co, cols in internal_co_mapping.items():
+            st.markdown(f"**{co}:** {', '.join(cols)}")
+        
+        # Manual override for column mapping
+        with st.expander("Override CO Column Mapping (Optional)"):
+            available_cols = [c for c in internal_df.columns if c not in ['RegNo', 'Name', 'RollNo', 'StudentID']]
+            
+            for co in ['CO1', 'CO2', 'CO3', 'CO4', 'CO5', 'CO6']:
+                default_cols = internal_co_mapping.get(co, [])
+                selected = st.multiselect(f"{co} Columns", available_cols, default=default_cols, key=f"e2e_{co}")
+                if selected:
+                    internal_co_mapping[co] = selected
+        
+        # Calculate max marks for each column
+        max_marks = {}
+        for co, cols in internal_co_mapping.items():
+            for col in cols:
+                if col in internal_df.columns:
+                    max_marks[col] = internal_df[col].max()
+        
+        # Process button
+        if st.button("Calculate Full Attainment Flow", type="primary"):
+            with st.spinner("Processing Internal Assessment..."):
+                # Step 1: Calculate Internal CO Attainment
+                internal_results = calculate_co_attainment_from_internal(
+                    internal_df, internal_co_mapping, max_marks
+                )
+            
+            # Step 2: Calculate ESE CO Attainment (if provided)
+            if ese_df is not None:
+                with st.spinner("Processing ESE..."):
+                    ese_co_mapping = extract_co_columns(ese_df)
+                    ese_max_marks = {}
+                    for co, cols in ese_co_mapping.items():
+                        for col in cols:
+                            if col in ese_df.columns:
+                                ese_max_marks[col] = ese_df[col].max()
+                    
+                    ese_results = calculate_co_attainment_from_internal(
+                        ese_df, ese_co_mapping, ese_max_marks
+                    )
+            else:
+                ese_results = None
+            
+            # Step 3: Calculate weighted attainment (Internal + ESE + Indirect)
+            with st.spinner("Calculating Weighted Attainment..."):
+                if ese_results is not None:
+                    weighted = calculate_weighted_co_attainment(
+                        internal_results.rename(columns={'attainment_pct': 'attainment_pct'}),
+                        ese_results.rename(columns={'attainment_pct': 'attainment_pct'}),
+                        internal_weight=internal_weight,
+                        ese_weight=ese_weight,
+                        indirect_weight=indirect_weight,
+                        indirect_scores=indirect_df
+                    )
+                else:
+                    # Only internal assessment
+                    weighted = internal_results.copy()
+                    weighted['direct_attainment'] = weighted['attainment_pct']
+                    weighted['final_attainment'] = weighted['attainment_pct']
+                    weighted['attainment_value'] = weighted['attainment_pct'] / 100.0
+            
+            # Display CO-level results
+            st.subheader("📊 CO Attainment Results")
+            
+            co_results_tab = st.tabs(["Internal", "ESE", "Direct", "Final"])
+            
+            with co_results_tab[0]:
+                st.markdown("**Internal Assessment CO Attainment**")
+                internal_display = internal_results.copy()
+                internal_display['course'] = course_code
+                internal_display['year'] = year
+                internal_display['attainment_type'] = 'INTERNAL'
+                st.dataframe(internal_display, use_container_width=True)
+            
+            with co_results_tab[1]:
+                if ese_results is not None:
+                    st.markdown("**ESE CO Attainment**")
+                    ese_display = ese_results.copy()
+                    ese_display['course'] = course_code
+                    ese_display['year'] = year
+                    ese_display['attainment_type'] = 'ESE'
+                    st.dataframe(ese_display, use_container_width=True)
+                else:
+                    st.info("No ESE data provided")
+            
+            with co_results_tab[2]:
+                st.markdown("**Direct Attainment (Internal × weight + ESE × weight)**")
+                st.dataframe(weighted[['co', 'attainment_pct_internal', 'attainment_pct_ese', 'direct_attainment']], use_container_width=True)
+            
+            with co_results_tab[3]:
+                st.markdown("**Final CO Attainment**")
+                final_display = weighted[['co', 'final_attainment']].copy()
+                final_display['attainment_level'] = final_display['final_attainment'].apply(
+                    lambda x: 3 if x >= 70 else (2 if x >= 60 else (1 if x >= 50 else 0))
+                )
+                st.dataframe(final_display, use_container_width=True)
+            
+            # Step 4: Generate CO Attainment CSV for PO calculation
+            co_records = []
+            
+            # Add INTERNAL
+            for _, row in internal_results.iterrows():
+                co_records.append({
+                    'year': year,
+                    'course': course_code,
+                    'co': row['co'],
+                    'attainment_type': 'INTERNAL',
+                    'value': round(row['attainment_pct'] / 100, 4)
+                })
+            
+            # Add ESE
+            if ese_results is not None:
+                for _, row in ese_results.iterrows():
+                    co_records.append({
+                        'year': year,
+                        'course': course_code,
+                        'co': row['co'],
+                        'attainment_type': 'ESE',
+                        'value': round(row['attainment_pct'] / 100, 4)
+                    })
+            
+            # Add DIRECT
+            for _, row in weighted.iterrows():
+                co_records.append({
+                    'year': year,
+                    'course': course_code,
+                    'co': row['co'],
+                    'attainment_type': 'DIRECT',
+                    'value': round(row['direct_attainment'] / 100, 4)
+                })
+            
+            # Add FINAL
+            for _, row in weighted.iterrows():
+                co_records.append({
+                    'year': year,
+                    'course': course_code,
+                    'co': row['co'],
+                    'attainment_type': 'FINAL',
+                    'value': round(row['final_attainment'] / 100, 4)
+                })
+            
+            co_attainment_df = pd.DataFrame(co_records)
+            
+            st.subheader("📥 Generated CO Attainment CSV")
+            st.dataframe(co_attainment_df, use_container_width=True)
+            
+            # Download CO CSV
+            co_csv = co_attainment_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download CO Attainment CSV",
+                data=co_csv,
+                file_name=f"co_attainment_{course_code}_{year}.csv",
+                mime="text/csv"
+            )
+            
+            # Need CO-PO mapping to proceed to PO calculation
+            st.subheader("📋 CO → PO/PSO Mapping")
+            st.markdown("Upload the CO → PO/PSO mapping file to calculate final PO/PSO attainment")
+            
+            mapping_file = st.file_uploader("CO → PO/PSO Mapping CSV", type=["csv"], key="e2e_mapping")
+            
+            if mapping_file:
+                try:
+                    map_df = load_mapping(mapping_file)
+                    map_df = map_df[map_df['course'] == course_code]
+                    
+                    st.markdown("**Mapping Preview:**")
+                    st.dataframe(map_df, use_container_width=True)
+                    
+                    # Calculate PO/PSO attainment
+                    with st.spinner("Calculating PO/PSO Attainment..."):
+                        results = compute_po_attainment_nba(
+                            co_attainment=co_attainment_df,
+                            mapping=map_df,
+                            thresholds=thresholds,
+                            targets=targets,
+                            attainment_type='FINAL'
+                        )
+                    
+                    st.subheader("🎯 Final PO/PSO Attainment Results")
+                    
+                    po_tabs = st.tabs(["PO Matrix (%)", "PO Scale (3)", "Target Achievement"])
+                    
+                    with po_tabs[0]:
+                        st.markdown("**PO/PSO Attainment (%)**")
+                        st.dataframe(results["po_matrix_pct"], use_container_width=True)
+                    
+                    with po_tabs[1]:
+                        st.markdown("**PO/PSO Attainment (Scale of 3)**")
+                        st.dataframe(results["po_matrix_scale"], use_container_width=True)
+                    
+                    with po_tabs[2]:
+                        st.markdown("**Target Achievement (≥ 1.4)**")
+                        st.dataframe(results["po_matrix_target"], use_container_width=True)
+                    
+                    st.success("✅ Full attainment flow complete: Internal → ESE → Direct → Final CO → PO/PSO %")
+                    
+                except Exception as e:
+                    st.error(f"Error calculating PO/PSO attainment: {e}")
+                    st.stop()
