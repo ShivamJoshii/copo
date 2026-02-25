@@ -69,7 +69,7 @@ if mode == "NLP CO–PO Mapping":
         help="Department-specific filtering for generic verbs"
     )
 
-    st.sidebar.info("ℹ️ Weight bins are fixed:\n- 0.00-0.25 ⇒ 0\n- 0.25-0.50 ⇒ 1\n- 0.50-0.75 ⇒ 2\n- 0.75-1.00 ⇒ 3")
+    st.sidebar.info("ℹ️ Weight bins are fixed:\n- 0.00-0.10 ⇒ 0\n- 0.10-0.25 ⇒ 1\n- 0.25-0.50 ⇒ 2\n- 0.50+ ⇒ 3")
 
     show_comparison = st.sidebar.checkbox("Show raw vs processed similarity", value=False,
         help="Compare similarity scores with and without preprocessing")

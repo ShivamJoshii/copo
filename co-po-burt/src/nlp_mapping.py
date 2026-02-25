@@ -312,10 +312,10 @@ def similarity_to_weight_bins(sim: float) -> int:
     Convert similarity score to weight (0-3) using fixed bins.
 
     Fixed bins:
-        0.00-0.25 => 0
-        0.25-0.50 => 1
-        0.50-0.75 => 2
-        0.75-1.00 => 3
+        0.00-0.10 => 0
+        0.10-0.25 => 1
+        0.25-0.50 => 2
+        0.50+     => 3
 
     Args:
         sim: Similarity score in [0, 1]
@@ -323,11 +323,11 @@ def similarity_to_weight_bins(sim: float) -> int:
     Returns:
         Weight in {0, 1, 2, 3}
     """
-    if sim < 0.25:
+    if sim < 0.10:
         return 0
-    elif sim < 0.50:
+    elif sim < 0.25:
         return 1
-    elif sim < 0.75:
+    elif sim < 0.50:
         return 2
     else:
         return 3
