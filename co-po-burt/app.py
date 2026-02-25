@@ -946,30 +946,34 @@ elif mode == "Full Pipeline (Map → Attain → PO)":
                     st.session_state.pipeline_step = 3
                     st.rerun()
     
-    # Step 3: Upload Assessment Data (One Excel File)
+    # Step 3: Upload Assessment Data (Excel OR CSVs)
     if step >= 3:
         with st.expander("📊 Step 3: Upload Assessment Data", expanded=(step == 3)):
-            st.markdown("""
-            **Upload ONE Excel file with tabs:**
-            - **Internal** tab: Raw IA student scores
-            - **ESE** tab: Raw ESE student scores  
-            - **Indirect** tab (optional): Indirect assessment data
-            """)
+            
+            # Choose upload method
+            upload_method = st.radio("Upload Method", ["One Excel file (tabs)", "Separate CSV files"], horizontal=True)
             
             col1, col2, col3 = st.columns(3)
             course_code = col1.text_input("Course Code", value="CS601")
             course_name = col2.text_input("Course Name", value="Compiler Design")
             year = col3.text_input("Year", value="2024")
             
-            excel_file = st.file_uploader("Assessment Excel (Internal/ESE/Indirect tabs)", type=["xlsx", "xls"], key="pipeline_excel")
-            
             col1, col2, col3 = st.columns(3)
             internal_weight = col1.slider("Internal Weight", 0.0, 1.0, 0.4, 0.1)
             ese_weight = col2.slider("ESE Weight", 0.0, 1.0, 0.6, 0.1)
             indirect_weight = col3.slider("Indirect Weight", 0.0, 1.0, 0.0, 0.1)
             
-            if excel_file:
-                if st.button("Process Assessments →", type="primary"):
+            if upload_method == "One Excel file (tabs)":
+                st.markdown("""
+                **Upload ONE Excel file with tabs:**
+                - **Internal** tab: Raw IA student scores
+                - **ESE** tab: Raw ESE student scores  
+                - **Indirect** tab (optional): Indirect assessment data
+                """)
+                
+                excel_file = st.file_uploader("Assessment Excel (Internal/ESE/Indirect tabs)", type=["xlsx", "xls"], key="pipeline_excel")
+                
+                if excel_file and st.button("Process Assessments →", type="primary"):
                     with st.spinner("Processing assessments..."):
                         # Parse Excel file
                         xl = pd.ExcelFile(excel_file)
@@ -1068,12 +1072,109 @@ elif mode == "Full Pipeline (Map → Attain → PO)":
                                 'attainment_type': 'INTERNAL', 'value': round(row['attainment_pct'] / 100, 4)
                             })
                         
-                        if ese_file:
-                            for _, row in ese_results.iterrows():
-                                co_records.append({
-                                    'year': year, 'course': course_code, 'co': row['co'],
-                                    'attainment_type': 'ESE', 'value': round(row['attainment_pct'] / 100, 4)
-                                })
+                        for _, row in ese_results.iterrows():
+                            co_records.append({
+                                'year': year, 'course': course_code, 'co': row['co'],
+                                'attainment_type': 'ESE', 'value': round(row['attainment_pct'] / 100, 4)
+                            })
+                        
+                        for _, row in weighted.iterrows():
+                            co_records.append({
+                                'year': year, 'course': course_code, 'co': row['co'],
+                                'attainment_type': 'DIRECT', 'value': round(row['direct_attainment'] / 100, 4)
+                            })
+                            co_records.append({
+                                'year': year, 'course': course_code, 'co': row['co'],
+                                'attainment_type': 'FINAL', 'value': round(row['final_attainment'] / 100, 4)
+                            })
+                        
+                        st.session_state.pipeline_co_attainment = pd.DataFrame(co_records)
+                        st.session_state.pipeline_course_code = course_code
+                        st.session_state.pipeline_year = year
+                        st.session_state.pipeline_step = 4
+                        st.rerun()
+            
+            else:  # Separate CSV files
+                st.markdown("""
+                **Upload separate CSV files:**
+                - **Internal CSV**: Raw IA student scores
+                - **ESE CSV**: Raw ESE student scores
+                - **Indirect CSV** (optional): Indirect assessment data with columns: co, attainment_pct
+                """)
+                
+                internal_csv = st.file_uploader("Internal Assessment CSV", type=["csv"], key="pipeline_internal_csv")
+                ese_csv = st.file_uploader("ESE CSV", type=["csv"], key="pipeline_ese_csv")
+                indirect_csv = st.file_uploader("Indirect CSV (optional)", type=["csv"], key="pipeline_indirect_csv")
+                
+                if internal_csv and ese_csv and st.button("Process Assessments →", type="primary"):
+                    with st.spinner("Processing assessments..."):
+                        # Load Internal CSV
+                        internal_df = pd.read_csv(internal_csv)
+                        
+                        # Auto-detect CO columns
+                        internal_co_mapping = extract_co_columns(internal_df)
+                        
+                        # Calculate max marks
+                        max_marks = {}
+                        for co, cols in internal_co_mapping.items():
+                            for col in cols:
+                                if col in internal_df.columns:
+                                    max_marks[col] = internal_df[col].max()
+                        
+                        # Calculate internal CO attainment
+                        internal_results = calculate_co_attainment_from_internal(
+                            internal_df, internal_co_mapping, max_marks
+                        )
+                        
+                        # Load and process ESE CSV
+                        ese_df = pd.read_csv(ese_csv)
+                        ese_co_mapping = extract_co_columns(ese_df)
+                        ese_max_marks = {}
+                        for co, cols in ese_co_mapping.items():
+                            for col in cols:
+                                if col in ese_df.columns:
+                                    ese_max_marks[col] = ese_df[col].max()
+                        
+                        ese_results = calculate_co_attainment_from_internal(
+                            ese_df, ese_co_mapping, ese_max_marks
+                        )
+                        
+                        # Load Indirect CSV if provided
+                        indirect_results = None
+                        if indirect_csv:
+                            indirect_df = pd.read_csv(indirect_csv)
+                            # For indirect, expect columns: co, attainment_pct
+                            if 'co' in indirect_df.columns and 'attainment_pct' in indirect_df.columns:
+                                indirect_results = indirect_df
+                        
+                        # Calculate weighted attainment
+                        weighted = calculate_weighted_co_attainment(
+                            internal_results.rename(columns={'attainment_pct': 'attainment_pct'}),
+                            ese_results.rename(columns={'attainment_pct': 'attainment_pct'}),
+                            internal_weight=internal_weight,
+                            ese_weight=ese_weight,
+                            indirect_weight=indirect_weight,
+                            indirect_scores=indirect_results
+                        )
+                        
+                        # Store results for display
+                        st.session_state.pipeline_internal_results = internal_results
+                        st.session_state.pipeline_ese_results = ese_results
+                        st.session_state.pipeline_weighted_results = weighted
+                        
+                        # Build CO attainment records
+                        co_records = []
+                        for _, row in internal_results.iterrows():
+                            co_records.append({
+                                'year': year, 'course': course_code, 'co': row['co'],
+                                'attainment_type': 'INTERNAL', 'value': round(row['attainment_pct'] / 100, 4)
+                            })
+                        
+                        for _, row in ese_results.iterrows():
+                            co_records.append({
+                                'year': year, 'course': course_code, 'co': row['co'],
+                                'attainment_type': 'ESE', 'value': round(row['attainment_pct'] / 100, 4)
+                            })
                         
                         for _, row in weighted.iterrows():
                             co_records.append({
